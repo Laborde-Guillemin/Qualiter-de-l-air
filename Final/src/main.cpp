@@ -5,6 +5,8 @@
 #include <SensirionI2CSfa3x.h>
 #include <Adafruit_BME280.h>
 #include <VOCGasIndexAlgorithm.h>
+#include "sps30.h"
+#include "SparkFun_SCD30_Arduino_Library.h"
 #include "FS.h"
 #include "SD.h"
 #include "SPI.h"
@@ -16,27 +18,42 @@
 #define MOSI  23
 #define CS  32
 
-//Variable des mesures
-float Temp;
-int Ald;
-float Hum;
-int Date = 14;
-int Heure = 18;
-int COV = 2;
-int CO2 = 9;
-int PM_25 = 100;
-int PM_1 = 55 ;
-int PM_10 = 12 ;
+/*Definition*/
+#define DEBUG 0
+#define SP30_COMMS Wire
+#define USE_50K_SPEED 1
+
+/*void read_all(); 
+void read_CO2 (); */
+void serialTrigger(char * mess);
+
 
 /*Initialisation des fonctions*/
 SensirionI2CSgp40 sgp40;
 SensirionI2CSfa3x sfa3x;
 Adafruit_BME280 bme;
+SPS30 sps30;
+SCD30 airSensor;
+
 float sampling_interval = 1.f;
 VOCGasIndexAlgorithm voc_algorithm(sampling_interval);
 String dataMessage;
-int Refresh = 60000; // 1min
+int Refresh = 1000; // 1min = 60000
+int RefreshCap = 500; // 30 seconde = 30000
 SPIClass spi = SPIClass(VSPI);
+
+
+//Variable de fonctionement
+int Date = rand()%31 +1;//
+int Heure = rand()%24 +1;//
+int Temp;// bme.readTemperature();
+int Hum;// bme.readHumidity()
+int COV;//
+int Alde;// hcho / 5.0
+unsigned int CO2;//
+float PM_25;//
+float PM_1;//
+float PM_10;//
 
 /////////////////////////////////
 /*Initialisation de la carte SD*/
@@ -117,7 +134,7 @@ void initFile(){
 
 /*Écriture des lignes d'informations dans la carte SD*/
 void ecriture(){
-  dataMessage = String(Date) +";"+ String(Heure) +";"+ String(Temp) + ";" + String(Hum) + ";" + String(COV) + ";" + String(Ald) + ";" + String(CO2) + ";" + String(PM_25) + ";" + String(PM_1) + ";" + String(PM_10) + "\r\n";
+  dataMessage = String(Date) +";"+ String(Heure) +";"+ String(Temp) + ";" + String(Hum) + ";" + String(COV) + ";" + String(Alde) + ";" + String(CO2) + ";" + String(PM_25) + ";" + String(PM_1) + ";" + String(PM_10) + "\r\n";
   Serial.print("Sauvegarde: ");
   Serial.println(dataMessage);
   appendFile(SD, "/Valeur.csv", dataMessage.c_str());
@@ -184,72 +201,87 @@ void initBME280(){
     }
 }
 
+void initCAp(){
+  Serial.begin(115200);
+  Serial.println("SCD30 Example");
+  Wire.begin();
+
+  
+  // set driver debug level
+  sps30.EnableDebugging(DEBUG);
+
+  // Begin communication channel
+  SP30_COMMS.begin();
+   
+
+  if (sps30.begin(&SP30_COMMS) == false) {
+    Serial.println(F("Could not set I2C communication channel."));
+    Serial.println(F("Program on hold"));
+    while(true) delay(100000);
+  }
+
+  // check for SPS30 connection
+  if (! sps30.probe()) {
+    Serial.println(F("could not probe / connect with SPS30."));
+    Serial.println(F("Program on hold"));
+    while(true) delay(100000);
+  }
+  else {
+    Serial.println(F("Detected SPS30."));
+  }
+
+  // reset SPS30 connection
+  if (! sps30.reset()) {
+    Serial.println(F("could not reset."));
+    Serial.println(F("Program on hold"));
+    while(true) delay(100000);
+  }
+
+  
+
+  if (sps30.I2C_expect() == 4)
+    Serial.println(F(" !!! Due to I2C buffersize only the SPS30 MASS concentration is available !!! \n"));
+
+  if (airSensor.begin() == false) {
+    Serial.println("Air sensor not detected. Please check wiring. Freezing...");
+    while (1);
+  }
+
+  // Démarre les mesures avec un intervalle de 20 secondes
+  airSensor.setMeasurementInterval(2);
+}
+
 ///////////////////////
 /*Mesure des capteurs*/
 ///////////////////////
+    // Mesure de la valeur brute du signal SGP40 en mode faible consommation
+void cap (){
+    uint16_t error;
+    char errorMessage[256];
+    uint16_t compensationRh = 0x8000;  // Valeur de compensation à ajuster
+    uint16_t compensationT = 0x6666;   // Valeur de compensation à ajuster
+    int32_t voc_index = 0;
 
-void MesureSGP40(){
-  // Mesure de la valeur brute du signal SGP40 en mode faible consommation
-  uint16_t error;
-  char errorMessage[256];
-  uint16_t compensationRh = 0x8000;  // Valeur de compensation à ajuster
-  uint16_t compensationT = 0x6666;   // Valeur de compensation à ajuster
-  int32_t voc_index = 0;
-  // Appel de la fonction pour mesurer la valeur brute & transformer du signal SGP40
-  sgp40MeasureRawSignalLowPower(compensationRh, compensationT, &error, voc_index);
+    // Appel de la fonction pour mesurer la valeur brute du signal SGP40
+    sgp40MeasureRawSignalLowPower(compensationRh, compensationT, &error, voc_index);
 
-}
-
-// Fonction pour mesurer la valeur brute du signal SGP40 en mode faible consommation
-void sgp40MeasureRawSignalLowPower(uint16_t compensationRh, uint16_t compensationT, uint16_t* error, int32_t voc_index) {
-    uint16_t srawVoc = 0;
-    // Demande d'une première mesure pour chauffer la plaque (ignorant le résultat)
-    *error = sgp40.measureRawSignal(compensationRh, compensationT, srawVoc);
-    if (*error) {
-        return;
-    }
-    // Délai de 170 ms pour laisser la plaque chauffer.
-    // En gardant à l'esprit que la commande de mesure inclut déjà un délai de 30 ms
-    delay(140);
-    // Demande des valeurs de mesure
-    *error = sgp40.measureRawSignal(compensationRh, compensationT, srawVoc);
-    if (*error) {
-        return;
-    }
-    Serial.print("srawVOC: ");
-    Serial.println(srawVoc);
-    // Désactiver le chauffage
-    *error = sgp40.turnHeaterOff();
-    if (*error) {
-        return;
-    }
-    // Traitement des signaux bruts par l'algorithme d'indice de gaz VOC pour obtenir les valeurs de l'indice VOC
-    voc_index = voc_algorithm.process(srawVoc);
-    int COV = voc_index;
-    Serial.print("COV Indice: ");
-    Serial.println(COV);
-}
-
-void MesureSFA30(){
-// Mesure des valeurs SFA3x
-  delay(1000);
-  int16_t hcho;
-  int16_t humidity;
-  int16_t temperature;
-  int16_t error = sfa3x.readMeasuredValues(hcho, humidity, temperature);
-  if (error) {
+    // Mesure des valeurs SFA3x
+    delay(1000);
+    int16_t hcho;
+    int16_t humidity;
+    int16_t temperature;
+    error = sfa3x.readMeasuredValues(hcho, humidity, temperature);
+    if (error) {
         Serial.print("Error trying to execute readMeasuredValues(): ");
         // Gérer l'erreur si nécessaire
     } else {
-        Ald = hcho / 5.0;
-        Serial.print("Hcho:");
-        Serial.print(Ald);
+        Alde = hcho / 5.0;
+        Serial.print("Forme Aldheyde:");
+        Serial.print(Alde);
         Serial.println("\t");
     }
-}
 
-void MesureBME280(){
-  // Mesure des valeurs BME280
+    // Mesure des valeurs BME280
     Serial.println("\t");
     Serial.println("\t");
     Temp = bme.readTemperature();
@@ -261,26 +293,128 @@ void MesureBME280(){
     Serial.print("Humidité = ");
     Serial.print(Hum);
     Serial.println(" %");
+
+    delay(RefreshCap);
+}
+
+// Fonction pour mesurer la valeur brute du signal SGP40 en mode faible consommation
+void sgp40MeasureRawSignalLowPower(uint16_t compensationRh, uint16_t compensationT, uint16_t* error, int32_t voc_index) {
+    uint16_t srawVoc = 0;
+
+    // Demande d'une première mesure pour chauffer la plaque (ignorant le résultat)
+    *error = sgp40.measureRawSignal(compensationRh, compensationT, srawVoc);
+    if (*error) {
+        return;
+    }
+
+    // Délai de 170 ms pour laisser la plaque chauffer.
+    // En gardant à l'esprit que la commande de mesure inclut déjà un délai de 30 ms
+    delay(140);
+
+    // Demande des valeurs de mesure
+    *error = sgp40.measureRawSignal(compensationRh, compensationT, srawVoc);
+    if (*error) {
+        return;
+    }
+
+   /* Serial.print("srawVOC: ");
+    Serial.println(srawVoc);*/
+
+    // Désactiver le chauffage
+    *error = sgp40.turnHeaterOff();
+    if (*error) {
+        return;
+    }
+
+    // Traitement des signaux bruts par l'algorithme d'indice de gaz VOC pour obtenir les valeurs de l'indice VOC
+    voc_index = voc_algorithm.process(srawVoc);
+    COV = voc_index;
+    Serial.print("COV: ");
+    Serial.println(COV);
+}
+
+void read_all()
+ {
+  
+  struct sps_values val;
+
+  uint8_t ret = sps30.GetValues(&val);
+  if (ret != SPS30_ERR_OK) {
+    Serial.print(F("Error during reading values: "));
+    char buf[80];
+    sps30.GetErrDescription(ret, buf, 80);
+    Serial.println(buf);
+    return;
+  }
+
+  Serial.print(val.MassPM1);
+  PM_1 = val.MassPM1;
+  Serial.print(F("\t"));
+  Serial.print(val.MassPM2);
+  PM_25 = val.MassPM2;
+  Serial.print(F("\t"));  
+  Serial.print(val.MassPM10);
+  PM_10 = val.MassPM10;
+  Serial.print(F("\n"));
 }
 
 
+
+void read_CO2 ()
+{ //Démarrer les mesures
+  airSensor.setMeasurementInterval(2);
+
+  // Attendre que les données soient disponibles
+  while (!airSensor.dataAvailable()) {
+    delay(1000); // Attente de 100 ms avant de vérifier à nouveau
+  }
+
+  // Lire et afficher les données
+  Serial.print("CO2: ");
+  CO2 = airSensor.getCO2();
+  Serial.print(CO2);
+  Serial.println("ppm");
+  Serial.println();
+
+  // Arrêter les mesures
+  airSensor.setMeasurementInterval(0); // Mettre l'intervalle à 0 pour arrêter les mesures
+
+  delay(5000); // Attendre 5 secondes avant de reprendre les mesures
+}
+void serialTrigger(char * mess)
+{
+  Serial.println();
+
+  while (!Serial.available()) {
+    Serial.println(mess);
+    delay(2000);
+  }
+
+  while (Serial.available())
+    Serial.read();}
+
 void setup() {
     Serial.begin(115200);
+    Wire.begin();
     while (!Serial) {
         delay(100);
     }
-    Wire.begin();
     initSDCard();
     initFile();
     initBME280();
     initSFA30();
     initSPG40();
+    initCAp();
 }
 
 void loop() {
-    MesureSFA30();
-    MesureBME280();
-    MesureSGP40();
+    uint8_t ret;
+    cap();
+    read_all();
+    delay(3000);
+    Serial.println("Entering sleep-mode");
+    ret = sps30.sleep(); 
+    read_CO2 (); 
     ecriture();
     delay(Refresh);
 }
