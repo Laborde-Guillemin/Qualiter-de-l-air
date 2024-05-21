@@ -11,6 +11,10 @@
 #include "SD.h"
 #include "SPI.h"
 #include "time.h"
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <RTClib.h>
 
 /*Port SPI*/
 #define SCK  18
@@ -18,14 +22,15 @@
 #define MOSI  23
 #define CS  32
 
+SPIClass spi = SPIClass(VSPI);
+
 /*Definition*/
 #define DEBUG 0
 #define SP30_COMMS Wire
 #define USE_50K_SPEED 1
 
-/*void read_all(); 
-void read_CO2 (); */
-void serialTrigger(char * mess);
+void read_PM(); 
+void read_CO2 (); 
 
 
 /*Initialisation des fonctions*/
@@ -38,21 +43,34 @@ SCD30 airSensor;
 float sampling_interval = 1.f;
 VOCGasIndexAlgorithm voc_algorithm(sampling_interval);
 String dataMessage;
-int Refresh = 1000; // 1min = 60000
-int RefreshCap = 500; // 30 seconde = 30000
-SPIClass spi = SPIClass(VSPI);
+int Refresh = 60000; // 1min = 60000
+int RefreshCap = 100; // 30 seconde = 30000
+
+// Replace with your network credentials
+const char* ssid = "WIFI-CIEL"; // test
+const char* password = "alcasarciel"; //alcasarciel
+
+// Create AsyncWebServer object on port 80
+AsyncWebServer server(80);
+
+int essai=0; 
+const char* ntpServer = "pool.ntp.org";
+const long  gmtOffset_sec = 7200* 1; //Décalage horaire : 3600 en hiver et 7200 en été
+const int   daylightOffset_sec = 7200 * 0; //Décalage horaire : 3600 en hiver et 7200 en été
+
+RTC_PCF8523 rtc; // Créez un objet pour le module RTC PCF8523
 
 
 //Variable de fonctionement
-int Date = rand()%31 +1;//
-int Heure = rand()%24 +1;//
-int Temp;// bme.readTemperature();
-int Hum;// bme.readHumidity()
+String Date;//
+String Heure;//
+float Temp;// bme.readTemperature();
+float Hum;// bme.readHumidity()
 int COV;//
 int Alde;// hcho / 5.0
-unsigned int CO2;//
-float PM_25;//
+int CO2;//
 float PM_1;//
+float PM_25;//
 float PM_10;//
 
 /////////////////////////////////
@@ -65,7 +83,6 @@ void initSDCard(){
     return;
   }
   uint8_t cardType = SD.cardType();
-
   if(cardType == CARD_NONE){
     Serial.println("No SD card attached");
     return;
@@ -87,7 +104,6 @@ void initSDCard(){
 /*Écriture du fichier*/
 void writeFile(fs::FS &fs, const char * path, const char * message){
   Serial.printf("Writing file: %s\n", path);
-
   File file = fs.open(path, FILE_WRITE);
   if(!file){
     Serial.println("Failed to open file for writing");
@@ -104,7 +120,6 @@ void writeFile(fs::FS &fs, const char * path, const char * message){
 /*Rajout dans le fichier*/
 void appendFile(fs::FS &fs, const char * path, const char * message){
   Serial.printf("Appending to file: %s\n", path);
-
   File file = fs.open(path, FILE_APPEND);
   if(!file){
     Serial.println("Failed to open file for appending");
@@ -134,12 +149,11 @@ void initFile(){
 
 /*Écriture des lignes d'informations dans la carte SD*/
 void ecriture(){
-  dataMessage = String(Date) +";"+ String(Heure) +";"+ String(Temp) + ";" + String(Hum) + ";" + String(COV) + ";" + String(Alde) + ";" + String(CO2) + ";" + String(PM_25) + ";" + String(PM_1) + ";" + String(PM_10) + "\r\n";
+  dataMessage = String(Date) +";"+ String(Heure) +";"+ String(Temp) + ";" + String(Hum) + ";" + String(COV) + ";" + String(Alde) + ";" + String(CO2) + ";" + String(PM_1) + ";" + String(PM_25) + ";" + String(PM_10) + "\r\n";
   Serial.print("Sauvegarde: ");
   Serial.println(dataMessage);
   appendFile(SD, "/Valeur.csv", dataMessage.c_str());
 }
-
 ///////////////////////////////
 /*Initialisation des capteurs*/
 ///////////////////////////////
@@ -148,11 +162,11 @@ void ecriture(){
 void sgp40MeasureRawSignalLowPower(uint16_t compensationRh, uint16_t compensationT, uint16_t* error, int32_t voc_index);
 
 void initSPG40(){
-  // Initialisation du capteur SGP40
+ // Initialisation du capteur SGP40
     sgp40.begin(Wire);
+    // Récupération du numéro de série du capteur SGP40
     uint16_t serialNumber[3];
     uint8_t serialNumberSize = 3;
-    // Obtention du numéro de série du capteur SGP40
     uint16_t error = sgp40.getSerialNumber(serialNumber, serialNumberSize);
     Serial.print("Sampling interval (sec):\t");
     Serial.println(voc_algorithm.get_sampling_interval());
@@ -180,13 +194,13 @@ void initSPG40(){
         Serial.println(testResult, HEX);
     }
 
+
 }
 
 void initSFA30(){
-  // Initialisation du capteur SFA30
-    sfa3x.begin(Wire);
-    // Démarrage de la mesure continue avec SFA30
-    uint16_t error = sfa3x.startContinuousMeasurement();
+   sfa3x.begin(Wire);
+    // Démarrage de la mesure continue avec SFA3x
+    int error = sfa3x.startContinuousMeasurement();
     if (error) {
         Serial.print("Error trying to execute startContinuousMeasurement(): ");
         // Gérer l'erreur si nécessaire
@@ -194,7 +208,7 @@ void initSFA30(){
 }
 
 void initBME280(){
-  // Initialisation du capteur BME280
+   // Initialisation du capteur BME280
     if (!bme.begin(0x76)) {
         Serial.println("Could not find a valid BME280 sensor, check wiring!");
         while (1);
@@ -202,24 +216,15 @@ void initBME280(){
 }
 
 void initCAp(){
-  Serial.begin(115200);
-  Serial.println("SCD30 Example");
-  Wire.begin();
-
-  
-  // set driver debug level
+ // set driver debug level
   sps30.EnableDebugging(DEBUG);
-
   // Begin communication channel
   SP30_COMMS.begin();
-   
-
   if (sps30.begin(&SP30_COMMS) == false) {
     Serial.println(F("Could not set I2C communication channel."));
     Serial.println(F("Program on hold"));
     while(true) delay(100000);
   }
-
   // check for SPS30 connection
   if (! sps30.probe()) {
     Serial.println(F("could not probe / connect with SPS30."));
@@ -229,16 +234,12 @@ void initCAp(){
   else {
     Serial.println(F("Detected SPS30."));
   }
-
   // reset SPS30 connection
   if (! sps30.reset()) {
     Serial.println(F("could not reset."));
     Serial.println(F("Program on hold"));
     while(true) delay(100000);
   }
-
-  
-
   if (sps30.I2C_expect() == 4)
     Serial.println(F(" !!! Due to I2C buffersize only the SPS30 MASS concentration is available !!! \n"));
 
@@ -246,99 +247,106 @@ void initCAp(){
     Serial.println("Air sensor not detected. Please check wiring. Freezing...");
     while (1);
   }
-
   // Démarre les mesures avec un intervalle de 20 secondes
   airSensor.setMeasurementInterval(2);
+}
+
+void initRTC (){
+    // Initialiser le module RTC
+  if (!rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    while (1);
+  }
+  // Synchroniser l'heure avec le serveur NTP
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  delay(2000); // Attendez que l'heure soit synchronisée
+  
+  // Obtenez l'heure actuelle du serveur NTP et réglez-la sur le RTC
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Failed to obtain time");
+  } 
+  else {
+    rtc.adjust(DateTime(timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min));
+  }
 }
 
 ///////////////////////
 /*Mesure des capteurs*/
 ///////////////////////
-    // Mesure de la valeur brute du signal SGP40 en mode faible consommation
-void cap (){
-    uint16_t error;
-    char errorMessage[256];
-    uint16_t compensationRh = 0x8000;  // Valeur de compensation à ajuster
-    uint16_t compensationT = 0x6666;   // Valeur de compensation à ajuster
-    int32_t voc_index = 0;
 
-    // Appel de la fonction pour mesurer la valeur brute du signal SGP40
-    sgp40MeasureRawSignalLowPower(compensationRh, compensationT, &error, voc_index);
-
-    // Mesure des valeurs SFA3x
-    delay(1000);
-    int16_t hcho;
-    int16_t humidity;
-    int16_t temperature;
-    error = sfa3x.readMeasuredValues(hcho, humidity, temperature);
-    if (error) {
-        Serial.print("Error trying to execute readMeasuredValues(): ");
-        // Gérer l'erreur si nécessaire
-    } else {
-        Alde = hcho / 5.0;
-        Serial.print("Forme Aldheyde:");
-        Serial.print(Alde);
-        Serial.println("\t");
-    }
-
-    // Mesure des valeurs BME280
-    Serial.println("\t");
-    Serial.println("\t");
-    Temp = bme.readTemperature();
-    Serial.print("Temperature = ");
-    Serial.print(Temp);
-    Serial.println(" °C");
-
-    Hum = bme.readHumidity();
-    Serial.print("Humidité = ");
-    Serial.print(Hum);
-    Serial.println(" %");
-
-    delay(RefreshCap);
-}
-
+/*Basile*/
 // Fonction pour mesurer la valeur brute du signal SGP40 en mode faible consommation
 void sgp40MeasureRawSignalLowPower(uint16_t compensationRh, uint16_t compensationT, uint16_t* error, int32_t voc_index) {
     uint16_t srawVoc = 0;
-
     // Demande d'une première mesure pour chauffer la plaque (ignorant le résultat)
     *error = sgp40.measureRawSignal(compensationRh, compensationT, srawVoc);
     if (*error) {
         return;
     }
-
     // Délai de 170 ms pour laisser la plaque chauffer.
     // En gardant à l'esprit que la commande de mesure inclut déjà un délai de 30 ms
     delay(140);
-
     // Demande des valeurs de mesure
     *error = sgp40.measureRawSignal(compensationRh, compensationT, srawVoc);
     if (*error) {
         return;
     }
-
-   /* Serial.print("srawVOC: ");
-    Serial.println(srawVoc);*/
-
     // Désactiver le chauffage
     *error = sgp40.turnHeaterOff();
     if (*error) {
-        return;
+        return;//on degage
     }
-
     // Traitement des signaux bruts par l'algorithme d'indice de gaz VOC pour obtenir les valeurs de l'indice VOC
     voc_index = voc_algorithm.process(srawVoc);
     COV = voc_index;
-    Serial.print("COV: ");
-    Serial.println(COV);
+    Serial.println("COV: "+ String(COV));
 }
 
-void read_all()
- {
-  
-  struct sps_values val;
+/*Basile*/
+void capteurT() {
+    // Mesure des valeurs BME280
+    Temp = bme.readTemperature();
+    Serial.println("Temperature = " + String(Temp)+ "°C");
+    Hum = bme.readHumidity();
+    Serial.println("Humidité = " + String(Hum) + "%");
+}
 
+/*Basile*/
+void capteurF() {
+    // Mesure des valeurs SFA3x
+    int16_t hcho;      // Formaldéhyde
+    int16_t humidity;  // Humidité
+    int16_t temperature;
+    int error = sfa3x.readMeasuredValues(hcho, humidity, temperature);
+    if (error) {
+        Serial.print("Error trying to execute readMeasuredValues(): ");
+        // Gérer l'erreur si nécessaire
+    } else {
+        Alde = hcho / 5.0;
+        Serial.println("Forme Aldéhyde:" + String(Alde));
+    }
+}
+
+/*Basile*/
+void capteurC(){
+    // Mesure de la valeur brute du signal SGP40 en mode faible consommation
+    uint16_t error;
+    char errorMessage[256];
+    uint16_t compensationRh = 0x8000;  // Valeur de compensation à ajuster
+    uint16_t compensationT = 0x6666;    // Valeur de compensation à ajuster
+    int32_t voc_index = 0;
+    // Appel de la fonction pour mesurer la valeur brute du signal SGP40
+    sgp40MeasureRawSignalLowPower(compensationRh, compensationT, &error, voc_index);
+
+}
+
+/*Asfal*/
+void read_PM(){
+  struct sps_values val;
   uint8_t ret = sps30.GetValues(&val);
+  //Serial.println("réveille");
+  ret = sps30.wakeup();
   if (ret != SPS30_ERR_OK) {
     Serial.print(F("Error during reading values: "));
     char buf[80];
@@ -346,75 +354,124 @@ void read_all()
     Serial.println(buf);
     return;
   }
-
-  Serial.print(val.MassPM1);
-  PM_1 = val.MassPM1;
-  Serial.print(F("\t"));
-  Serial.print(val.MassPM2);
-  PM_25 = val.MassPM2;
-  Serial.print(F("\t"));  
-  Serial.print(val.MassPM10);
-  PM_10 = val.MassPM10;
-  Serial.print(F("\n"));
+  PM_1 = val.MassPM1;//
+  PM_25 = val.MassPM2;//
+  PM_10 = val.MassPM10;//
+  char buffer[50];
+  sprintf(buffer, "Valeur PM1: %.2f, PM2.5: %.2f, PM10: %.2f", PM_1, PM_25, PM_10);
+  Serial.println(buffer);
+  //Serial.println("Entering sleep-mode");
+  ret = sps30.sleep(); 
 }
 
-
-
-void read_CO2 ()
-{ //Démarrer les mesures
+/*Asfal*/
+void read_CO2 (){ 
+  //Démarrer les mesures
   airSensor.setMeasurementInterval(2);
-
   // Attendre que les données soient disponibles
   while (!airSensor.dataAvailable()) {
     delay(1000); // Attente de 100 ms avant de vérifier à nouveau
   }
-
-  // Lire et afficher les données
-  Serial.print("CO2: ");
   CO2 = airSensor.getCO2();
-  Serial.print(CO2);
-  Serial.println("ppm");
-  Serial.println();
-
+  // Lire et afficher les données
+  Serial.println("CO2: " + String(CO2)+ "ppm");
   // Arrêter les mesures
   airSensor.setMeasurementInterval(0); // Mettre l'intervalle à 0 pour arrêter les mesures
-
-  delay(5000); // Attendre 5 secondes avant de reprendre les mesures
 }
-void serialTrigger(char * mess)
-{
-  Serial.println();
 
-  while (!Serial.available()) {
-    Serial.println(mess);
-    delay(2000);
+// Lire l'heure du module RTC
+void donnerHeure (){
+  DateTime now = rtc.now();
+  // Affichage de la date
+  Date = (String(now.day()) + "/" + String(now.month()) + "/" + String(now.year()) + " ");
+  // Affichage de l'heure
+  Heure = (String(now.hour())+ ":" + String(now.minute()) +"");
+  // Horodater les mesures des capteurs avec l'heure du RTC
+  Serial.println("RTC time: "+Date +Heure);
+}
+
+//////////////////////////
+/*Gestion du serveur web*/
+//////////////////////////
+
+void serveurNTP(){
+  WiFi.mode(WIFI_STA); // Optional
+  WiFi.begin(ssid, password);
+  Serial.println("\nConnecting");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(100);
+    essai++;
+    if (essai >= 30) 
+    {
+        Serial.println("Connexion échouée après plusieurs tentatives."); 
+        break;
+        
+      }
   }
+  
+}
 
-  while (Serial.available())
-    Serial.read();}
+void initWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi ..");
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print('.');
+    delay(1000);
+  }
+  Serial.println(WiFi.localIP());
+}
+String generateData() {
+  // Measure sensors data
+  capteurT();
+  read_PM();
+  // Generate JSON string
+  String data = "{\"temperature\": " + String(Temp, 2) + ", \"humidity\": " + String(Hum, 2) + ",\"CO2\": " + String(CO2) + ", \"COV\": " + String(COV) + "\"FormeAlde\": " + String(Alde) + ",\"PM_1\": " + String(PM_1, 2) + ", \"PM_25\": " + String(PM_25, 2) + ", \"PM_10\": " + String(PM_10, 2) + "}";
+  return data;
+}
 
 void setup() {
     Serial.begin(115200);
     Wire.begin();
-    while (!Serial) {
-        delay(100);
-    }
     initSDCard();
     initFile();
     initBME280();
     initSFA30();
     initSPG40();
     initCAp();
+    serveurNTP();
+    initRTC();
+   /* initWiFi();
+    server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request) {
+    capteurT();
+    request->send_P(200, "application/json", generateData().c_str());
+  });
+
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SD, "/index.html", "text/html");
+  });
+
+  server.serveStatic("/", SD, "/");
+  server.serveStatic("/styles.css", SD, "/styles.css");
+  server.serveStatic("/script.js", SD, "/script.js");
+  server.begin();*/
 }
 
 void loop() {
-    uint8_t ret;
-    cap();
-    read_all();
-    delay(3000);
-    Serial.println("Entering sleep-mode");
-    ret = sps30.sleep(); 
-    read_CO2 (); 
+  /*Capteur Basile*/
+    capteurT(); 
+    capteurC();
+    capteurF();
+    /*Capteur Asfal*/
+    read_CO2();
+    read_PM();
+    donnerHeure();
+    /*Capteur Idem*/
+
+    /*Carte SD*/
     ecriture();
-    delay(Refresh);
+    /*Refresh*/
+    delay(RefreshCap);
 }
