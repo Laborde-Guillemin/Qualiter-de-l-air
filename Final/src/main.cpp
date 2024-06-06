@@ -15,22 +15,12 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <RTClib.h>
-
-/*Port SPI*/
-#define SCK  18
-#define MISO  19
-#define MOSI  23
-#define CS  32
-
-SPIClass spi = SPIClass(VSPI);
+#include <Arduino_GFX_Library.h>
 
 /*Definition*/
 #define DEBUG 0
 #define SP30_COMMS Wire
 #define USE_50K_SPEED 1
-
-void read_PM(); 
-void read_CO2 (); 
 
 
 /*Initialisation des fonctions*/
@@ -42,26 +32,17 @@ SCD30 airSensor;
 
 float sampling_interval = 1.f;
 VOCGasIndexAlgorithm voc_algorithm(sampling_interval);
-String dataMessage;
 int Refresh = 60000; // 1min = 60000
-int RefreshCap = 100; // 30 seconde = 30000
+int RefreshCap = 30000; // 30 seconde = 30000
 
 // Replace with your network credentials
-const char* ssid = "WIFI-CIEL"; // test
-const char* password = "alcasarciel"; //alcasarciel
-
+const char* ssid = "Wifi-visiteur"; //  WIFI-CIEL
+const char* password = "Ba4:z653z"; //alcasarciel 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 
-int essai=0; 
-const char* ntpServer = "pool.ntp.org";
-const long  gmtOffset_sec = 7200* 1; //Décalage horaire : 3600 en hiver et 7200 en été
-const int   daylightOffset_sec = 7200 * 0; //Décalage horaire : 3600 en hiver et 7200 en été
 
-RTC_PCF8523 rtc; // Créez un objet pour le module RTC PCF8523
-
-
-//Variable de fonctionement
+//Variable Mesures Capteurs
 String Date;//
 String Heure;//
 float Temp;// bme.readTemperature();
@@ -73,9 +54,20 @@ float PM_1;//
 float PM_25;//
 float PM_10;//
 
-/////////////////////////////////
+////////////////////
+/*Gestion carte SD*/
+////////////////////
+
+//Port SPI de la carte SD
+#define SCK  18
+#define MISO  19
+#define MOSI  23
+#define CS  32
+
+String dataMessage;
+SPIClass spi = SPIClass(VSPI);
+
 /*Initialisation de la carte SD*/
-/////////////////////////////////
 void initSDCard(){
   spi.begin(SCK, MISO, MOSI, CS);
   if (!SD.begin(CS,spi,80000000)) {
@@ -139,7 +131,7 @@ void initFile(){
   if(!file) {
     Serial.println("File doesn't exist");
     Serial.println("Creating file...");
-    writeFile(SD, "/Valeur.csv", "Date; Heure; Température; Humidité; Indice de COV; Forme Aldéhyde; CO²; PM_2.5; PM_1; PM_10 \r\n");
+    writeFile(SD, "/Valeur.csv", "Date; Heure; Température; Humidité; Indice de COV; Forme Aldéhyde; CO²; PM_1; PM_2,5; PM_10 \r\n");
   }
   else {
     Serial.println("File already exists");  
@@ -149,20 +141,25 @@ void initFile(){
 
 /*Écriture des lignes d'informations dans la carte SD*/
 void ecriture(){
-  dataMessage = String(Date) +";"+ String(Heure) +";"+ String(Temp) + ";" + String(Hum) + ";" + String(COV) + ";" + String(Alde) + ";" + String(CO2) + ";" + String(PM_1) + ";" + String(PM_25) + ";" + String(PM_10) + "\r\n";
-  Serial.print("Sauvegarde: ");
-  Serial.println(dataMessage);
+  dataMessage = String(Date) +";"
+              + String(Heure) +";"
+              + String(Temp) + ";" 
+              + String(Hum) + ";" 
+              + String(COV) + ";" 
+              + String(Alde) + ";" 
+              + String(CO2) + ";" 
+              + String(PM_1) + ";" 
+              + String(PM_25) + ";" 
+              + String(PM_10) + "\r\n";
+  Serial.println("Sauvegarde SD est OK");
   appendFile(SD, "/Valeur.csv", dataMessage.c_str());
 }
-///////////////////////////////
-/*Initialisation des capteurs*/
-///////////////////////////////
+////////////
+/*Capteurs*/
+////////////
 
-// Fonction pour mesurer la valeur brute du signal SGP40 en mode faible consommation
-void sgp40MeasureRawSignalLowPower(uint16_t compensationRh, uint16_t compensationT, uint16_t* error, int32_t voc_index);
-
+/*Initialisation SPG40*/
 void initSPG40(){
- // Initialisation du capteur SGP40
     sgp40.begin(Wire);
     // Récupération du numéro de série du capteur SGP40
     uint16_t serialNumber[3];
@@ -181,7 +178,6 @@ void initSPG40(){
             Serial.print(serialNumber[i], HEX);
             Serial.print(" ");
         }
-        Serial.println();
     }
     uint16_t testResult;
     // Test d'auto-étalonnage du capteur SGP40
@@ -193,10 +189,47 @@ void initSPG40(){
         Serial.print("executeSelfTest failed with error: ");
         Serial.println(testResult, HEX);
     }
-
-
 }
 
+/*Fonction pour mesurer la valeur brute du signal SGP40 en mode faible consommation*/
+void sgp40MeasureRawSignalLowPower(uint16_t compensationRh, uint16_t compensationT, uint16_t* error, int32_t voc_index) {
+    uint16_t srawVoc = 0;
+    *error = sgp40.measureRawSignal(compensationRh, compensationT, srawVoc);// Demande d'une première mesure pour chauffer la plaque
+    if (*error) {
+        return;
+    }
+    delay(140);// Délai de 170 ms pour laisser la plaque chauffer; la commande de mesure a un délai de 30 ms.
+    *error = sgp40.measureRawSignal(compensationRh, compensationT, srawVoc); // Demande des valeurs de mesure
+    if (*error) {
+        return;
+    }
+    // Désactiver le chauffage
+    *error = sgp40.turnHeaterOff();
+    if (*error) {
+        return;//on degage
+    }
+    voc_index = voc_algorithm.process(srawVoc); // Traitement des signaux bruts par l'algorithme d'indice de gaz VOC pour obtenir les valeurs de l'indice VOC
+    COV = voc_index;
+    Serial.println("COV: "+ String(COV));
+}
+
+/*Initialisation BME280*/
+void initBME280(){
+   // Initialisation du capteur BME280
+    if (!bme.begin(0x76)) {
+        Serial.println("Could not find a valid BME280 sensor, check wiring!");
+        while (1);
+    }
+}
+/*Mesure Température et humidité*/
+void capteurT() {
+    // Mesure des valeurs BME280
+    Temp = bme.readTemperature();
+    Serial.println("Temperature = " + String(Temp)+ "°C");
+    Hum = bme.readHumidity();
+    Serial.println("Humidité = " + String(Hum) + "%");
+}
+/*Initialaisation SFA30*/
 void initSFA30(){
    sfa3x.begin(Wire);
     // Démarrage de la mesure continue avec SFA3x
@@ -206,16 +239,39 @@ void initSFA30(){
         // Gérer l'erreur si nécessaire
     }
 }
-
-void initBME280(){
-   // Initialisation du capteur BME280
-    if (!bme.begin(0x76)) {
-        Serial.println("Could not find a valid BME280 sensor, check wiring!");
-        while (1);
+/*Mesure Formaldéhyde*/
+void capteurF() {
+    // Mesure des valeurs SFA3x
+    int16_t hcho;      // Formaldéhyde
+    int16_t humidity;  // Humidité
+    int16_t temperature;
+    int error = sfa3x.readMeasuredValues(hcho, humidity, temperature);
+    if (error) {
+        Serial.print("Error trying to execute readMeasuredValues(): ");
+        // Gérer l'erreur si nécessaire
+    } else {
+        Alde = hcho / 5.0;
+        Serial.println("Forme Aldéhyde:" + String(Alde));
     }
 }
 
-void initCAp(){
+/*Basile*/
+void capteurC(){
+  // Mesure de la valeur brute du signal SGP40 en mode faible consommation
+    uint16_t error;
+    char errorMessage[256];
+    uint16_t compensationRh = 0x8000;  // Valeur de compensation à ajuster
+    uint16_t compensationT = 0x6666;    // Valeur de compensation à ajuster
+    int32_t voc_index = 0;
+    // Appel de la fonction pour mesurer la valeur brute du signal SGP40
+    sgp40MeasureRawSignalLowPower(compensationRh, compensationT, &error, voc_index);
+}
+
+/////////////////
+/*Capteur Asfal*/
+/////////////////
+/*Initialisation des capteurs PM et CO2*/
+void initSPS30(){
  // set driver debug level
   sps30.EnableDebugging(DEBUG);
   // Begin communication channel
@@ -251,6 +307,51 @@ void initCAp(){
   airSensor.setMeasurementInterval(2);
 }
 
+/*Asfal*/
+void read_PM(){
+  struct sps_values val;
+  uint8_t ret = sps30.GetValues(&val);
+  ret = sps30.wakeup(); //Réveille du mode sommeille
+  if (ret != SPS30_ERR_OK) {
+    Serial.print(F("Error during reading values: "));
+    char buf[80];
+    sps30.GetErrDescription(ret, buf, 80);
+    Serial.println(buf);
+    return;
+  }
+  PM_1 = val.MassPM1;//
+  PM_25 = val.MassPM2;//
+  PM_10 = val.MassPM10;//
+  char buffer[50];
+  sprintf(buffer, "Valeur PM1: %.2f, PM2.5: %.2f, PM10: %.2f", PM_1, PM_25, PM_10);
+  Serial.println(buffer);
+  ret = sps30.sleep(); //entrer en mode sommeil
+}
+
+/*Asfal*/
+void read_CO2 (){ 
+  //Démarrer les mesures
+  airSensor.setMeasurementInterval(2);
+  // Attendre que les données soient disponibles
+  while (!airSensor.dataAvailable()) {
+    delay(1000); // Attente de 100 ms avant de vérifier à nouveau
+  }
+  CO2 = airSensor.getCO2();
+  Serial.println("CO2: " + String(CO2) + "ppm");
+  // Arrêter les mesures
+  airSensor.setMeasurementInterval(0); // Mettre l'intervalle à 0 pour arrêter les mesures
+}
+
+///////////////
+/*Gestion RTC*/
+///////////////
+
+int essai=0; 
+const char* ntpServer = "pool.ntp.org";
+const long  gmtOffset_sec = 7200* 1; //Décalage horaire : 3600 en hiver et 7200 en été
+const int   daylightOffset_sec = 7200 * 0; //Décalage horaire : 3600 en hiver et 7200 en été
+RTC_PCF8523 rtc; // Créez un objet pour le module RTC PCF8523
+
 void initRTC (){
     // Initialiser le module RTC
   if (!rtc.begin()) {
@@ -271,134 +372,121 @@ void initRTC (){
   }
 }
 
-///////////////////////
-/*Mesure des capteurs*/
-///////////////////////
-
-/*Basile*/
-// Fonction pour mesurer la valeur brute du signal SGP40 en mode faible consommation
-void sgp40MeasureRawSignalLowPower(uint16_t compensationRh, uint16_t compensationT, uint16_t* error, int32_t voc_index) {
-    uint16_t srawVoc = 0;
-    // Demande d'une première mesure pour chauffer la plaque (ignorant le résultat)
-    *error = sgp40.measureRawSignal(compensationRh, compensationT, srawVoc);
-    if (*error) {
-        return;
-    }
-    // Délai de 170 ms pour laisser la plaque chauffer.
-    // En gardant à l'esprit que la commande de mesure inclut déjà un délai de 30 ms
-    delay(140);
-    // Demande des valeurs de mesure
-    *error = sgp40.measureRawSignal(compensationRh, compensationT, srawVoc);
-    if (*error) {
-        return;
-    }
-    // Désactiver le chauffage
-    *error = sgp40.turnHeaterOff();
-    if (*error) {
-        return;//on degage
-    }
-    // Traitement des signaux bruts par l'algorithme d'indice de gaz VOC pour obtenir les valeurs de l'indice VOC
-    voc_index = voc_algorithm.process(srawVoc);
-    COV = voc_index;
-    Serial.println("COV: "+ String(COV));
-}
-
-/*Basile*/
-void capteurT() {
-    // Mesure des valeurs BME280
-    Temp = bme.readTemperature();
-    Serial.println("Temperature = " + String(Temp)+ "°C");
-    Hum = bme.readHumidity();
-    Serial.println("Humidité = " + String(Hum) + "%");
-}
-
-/*Basile*/
-void capteurF() {
-    // Mesure des valeurs SFA3x
-    int16_t hcho;      // Formaldéhyde
-    int16_t humidity;  // Humidité
-    int16_t temperature;
-    int error = sfa3x.readMeasuredValues(hcho, humidity, temperature);
-    if (error) {
-        Serial.print("Error trying to execute readMeasuredValues(): ");
-        // Gérer l'erreur si nécessaire
-    } else {
-        Alde = hcho / 5.0;
-        Serial.println("Forme Aldéhyde:" + String(Alde));
-    }
-}
-
-/*Basile*/
-void capteurC(){
-    // Mesure de la valeur brute du signal SGP40 en mode faible consommation
-    uint16_t error;
-    char errorMessage[256];
-    uint16_t compensationRh = 0x8000;  // Valeur de compensation à ajuster
-    uint16_t compensationT = 0x6666;    // Valeur de compensation à ajuster
-    int32_t voc_index = 0;
-    // Appel de la fonction pour mesurer la valeur brute du signal SGP40
-    sgp40MeasureRawSignalLowPower(compensationRh, compensationT, &error, voc_index);
-
-}
-
-/*Asfal*/
-void read_PM(){
-  struct sps_values val;
-  uint8_t ret = sps30.GetValues(&val);
-  //Serial.println("réveille");
-  ret = sps30.wakeup();
-  if (ret != SPS30_ERR_OK) {
-    Serial.print(F("Error during reading values: "));
-    char buf[80];
-    sps30.GetErrDescription(ret, buf, 80);
-    Serial.println(buf);
-    return;
-  }
-  PM_1 = val.MassPM1;//
-  PM_25 = val.MassPM2;//
-  PM_10 = val.MassPM10;//
-  char buffer[50];
-  sprintf(buffer, "Valeur PM1: %.2f, PM2.5: %.2f, PM10: %.2f", PM_1, PM_25, PM_10);
-  Serial.println(buffer);
-  //Serial.println("Entering sleep-mode");
-  ret = sps30.sleep(); 
-}
-
-/*Asfal*/
-void read_CO2 (){ 
-  //Démarrer les mesures
-  airSensor.setMeasurementInterval(2);
-  // Attendre que les données soient disponibles
-  while (!airSensor.dataAvailable()) {
-    delay(1000); // Attente de 100 ms avant de vérifier à nouveau
-  }
-  CO2 = airSensor.getCO2();
-  // Lire et afficher les données
-  Serial.println("CO2: " + String(CO2)+ "ppm");
-  // Arrêter les mesures
-  airSensor.setMeasurementInterval(0); // Mettre l'intervalle à 0 pour arrêter les mesures
-}
-
 // Lire l'heure du module RTC
 void donnerHeure (){
   DateTime now = rtc.now();
-  // Affichage de la date
+  // variable date
   Date = (String(now.day()) + "/" + String(now.month()) + "/" + String(now.year()) + " ");
-  // Affichage de l'heure
+  // variable heure
   Heure = (String(now.hour())+ ":" + String(now.minute()) +"");
   // Horodater les mesures des capteurs avec l'heure du RTC
   Serial.println("RTC time: "+Date +Heure);
 }
 
+//////////////////
+/*Gestion de IHM*/
+//////////////////
+
+// Broches pour l'écran TFT
+#define TFT_SCK    18
+#define TFT_MOSI   23
+#define TFT_MISO   19
+#define TFT_CS     5
+#define TFT_DC     2
+#define TFT_RESET  4
+// Initialisation de l'afficheur
+Arduino_ESP32SPI bus = Arduino_ESP32SPI(TFT_DC, TFT_CS, TFT_SCK, TFT_MOSI, TFT_MISO);
+Arduino_ILI9341 display = Arduino_ILI9341(&bus, TFT_RESET);
+
+// Étiquettes pour les données affichées
+const char* labels[] = {"Temperature:","Humidite:","COV:","Forme Aldehyde:","CO2:","Pm_1:","Pm_2,5:","Pm_10:"};
+
+char values[8][10]; // Tableau pour stocker les valeurs à afficher
+
+void initEcran(){
+    // Initialisation de l'afficheur
+  display.begin();
+  display.setRotation(3);
+  display.fillScreen(WHITE);
+
+  // Initialise les valeurs affichées à des chaînes vides
+  for (int i = 0; i < 8; i++) {
+    values[i][0] = '\0';
+  }
+}
+
+void ecran(){
+  // Met à jour les valeurs affichées
+  snprintf(values[0], sizeof(values[0]), "%.2f", Temp);
+  snprintf(values[1], sizeof(values[1]), "%.2f", Hum);
+  snprintf(values[2], sizeof(values[2]), "%d", COV);
+  snprintf(values[3], sizeof(values[3]), "%d", Alde);
+  snprintf(values[4], sizeof(values[4]), "%d", CO2);
+  snprintf(values[5], sizeof(values[5]), "%.2f", PM_1);
+  snprintf(values[6], sizeof(values[6]), "%.2f", PM_25);
+  snprintf(values[7], sizeof(values[7]), "%.2f", PM_10);
+
+  // Efface l'écran
+  display.fillScreen(WHITE);
+
+  // Affiche les étiquettes et les valeurs
+  int yPos = 10; // Position Y pour les éléments
+  display.setTextSize(2); //taille du texte
+  display.setTextColor(BLACK);
+  for (int i = 0; i < sizeof(labels) / sizeof(labels[0]); ++i) {
+    display.setCursor(20, yPos);
+    display.print(labels[i]);
+
+    // Vérifie la valeur du CO2 et définit la couleur en conséquence
+    if (i == 4) { // CO2 est à l'index 4 dans le tableau values
+      float co2Value = atof(values[i]);
+      if (co2Value > 1000) {
+        display.setTextColor(RED);
+      } else if (co2Value >= 600 && co2Value <= 1000) {
+        display.setTextColor(GREEN);
+      } else if (co2Value >= 400 && co2Value < 600) {
+        display.setTextColor(YELLOW);
+      } else if (co2Value == 400) {
+        display.setTextColor(ORANGE);
+      }
+    }else{
+        display.setTextColor(BLACK); // Couleur par défaut
+      }
+      display.print(values[i]);
+      if (i == 2) { // COV est à l'index 2 dans le tableau values
+      long covValue = atol(values[i]);
+      if (covValue > 10000) {
+        display.setTextColor(RED);
+      } else if (covValue >= 3000 && covValue <= 10000) {
+        display.setTextColor(ORANGE);
+      } else if (covValue >= 1000 && covValue < 3000) {
+        display.setTextColor(YELLOW);
+      } else if (covValue >= 300 && covValue < 1000) {
+        display.setTextColor(GREEN);
+      } else if (covValue == 300) {
+        display.setTextColor(BLACK);
+      } else {
+        display.setTextColor(GREEN);
+      }
+      //display.print(values[i]);
+    }
+    yPos += 30; // Espacement vertical entre les étiquettes
+  }
+   // Affichage de l'heure et de la date
+    display.setTextSize(1.5);
+    display.setCursor(220, 215);
+    display.print(Heure); 
+    display.setCursor(220, 225);
+    display.print(Date);
+}
+
 //////////////////////////
 /*Gestion du serveur web*/
 //////////////////////////
-
 void serveurNTP(){
   WiFi.mode(WIFI_STA); // Optional
   WiFi.begin(ssid, password);
   Serial.println("\nConnecting");
-
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print(".");
     delay(100);
@@ -407,10 +495,8 @@ void serveurNTP(){
     {
         Serial.println("Connexion échouée après plusieurs tentatives."); 
         break;
-        
       }
-  }
-  
+  } 
 }
 
 void initWiFi() {
@@ -423,13 +509,40 @@ void initWiFi() {
   }
   Serial.println(WiFi.localIP());
 }
-String generateData() {
-  // Measure sensors data
-  capteurT();
-  read_PM();
-  // Generate JSON string
-  String data = "{\"temperature\": " + String(Temp, 2) + ", \"humidity\": " + String(Hum, 2) + ",\"CO2\": " + String(CO2) + ", \"COV\": " + String(COV) + "\"FormeAlde\": " + String(Alde) + ",\"PM_1\": " + String(PM_1, 2) + ", \"PM_25\": " + String(PM_25, 2) + ", \"PM_10\": " + String(PM_10, 2) + "}";
-  return data;
+
+void valeur(){
+  Temp;
+  Hum;
+  COV;
+  Alde;
+  CO2;
+  PM_25 ;
+  PM_1;
+  PM_10;
+  Serial.println("Envoie vers le serveur.Ok");
+}
+
+void comServeur(){
+  server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request) {
+      Serial.println("Envoie vers le serveur.Ok");
+    String data = "{\"temperature\": " + String(Temp) + 
+                  ", \"humidity\": " + String(Hum) + 
+                  ", \"CO2\": " + String(CO2) + 
+                  ", \"COV\": " + String(COV) + 
+                  ", \"FormeAlde\": " + String(Alde) + 
+                  ", \"PM_1\": " + String(PM_1) + 
+                  ", \"PM_25\": " + String(PM_25) + 
+                  ", \"PM_10\": " + String(PM_10) + "}";
+    request->send(200, "application/json", data);
+  });
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SD, "/index.html", "text/html");
+  });
+  server.serveStatic("/", SD, "/");
+  server.serveStatic("/styles.css", SD, "/styles.css");
+  server.serveStatic("/script.js", SD, "/script.js");
+
+  server.begin();
 }
 
 void setup() {
@@ -437,41 +550,30 @@ void setup() {
     Wire.begin();
     initSDCard();
     initFile();
-    initBME280();
-    initSFA30();
-    initSPG40();
-    initCAp();
+    initBME280();//température
+    initSFA30();//Formaldéhyde
+    initSPG40();//COV
+    initSPS30();//PM
     serveurNTP();
     initRTC();
-   /* initWiFi();
-    server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request) {
-    capteurT();
-    request->send_P(200, "application/json", generateData().c_str());
-  });
-
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(SD, "/index.html", "text/html");
-  });
-
-  server.serveStatic("/", SD, "/");
-  server.serveStatic("/styles.css", SD, "/styles.css");
-  server.serveStatic("/script.js", SD, "/script.js");
-  server.begin();*/
+    initEcran();
+    initWiFi();
+    comServeur();
 }
 
 void loop() {
   /*Capteur Basile*/
-    capteurT(); 
-    capteurC();
-    capteurF();
+    capteurT(); //Capteur de température
+    capteurC(); //Capteur de COV
+    capteurF(); // Capteur Forme Aldhéyde
     /*Capteur Asfal*/
-    read_CO2();
-    read_PM();
-    donnerHeure();
+    read_CO2(); //Capteur de CO2
+    read_PM();  //Capteur de PM
+    donnerHeure(); // RTC
     /*Capteur Idem*/
-
-    /*Carte SD*/
-    ecriture();
-    /*Refresh*/
-    delay(RefreshCap);
+    ecran(); //Mise à jour de l'écran
+    /*Guillemin*/
+    //valeur();
+    ecriture();// écriture des valeurs dans la carte SD
+    delay(RefreshCap/2);
 }
