@@ -36,8 +36,8 @@ int Refresh = 60000; // 1min = 60000
 int RefreshCap = 30000; // 30 seconde = 30000
 
 // Replace with your network credentials
-const char* ssid = "Wifi-visiteur"; //  WIFI-CIEL
-const char* password = "Ba4:z653z"; //alcasarciel 
+const char* ssid = "WIFI-CIEL"; // Wifi-visiteur
+const char* password = "alcasarciel"; // Ba4:z653z
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 
@@ -510,18 +510,6 @@ void initWiFi() {
   Serial.println(WiFi.localIP());
 }
 
-void valeur(){
-  Temp;
-  Hum;
-  COV;
-  Alde;
-  CO2;
-  PM_25 ;
-  PM_1;
-  PM_10;
-  Serial.println("Envoie vers le serveur.Ok");
-}
-
 void comServeur(){
   server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request) {
       Serial.println("Envoie vers le serveur.Ok");
@@ -573,7 +561,6 @@ void loop() {
     /*Capteur Idem*/
     ecran(); //Mise à jour de l'écran
     /*Guillemin*/
-    //valeur();
     ecriture();// écriture des valeurs dans la carte SD
     delay(RefreshCap/2);
 }
