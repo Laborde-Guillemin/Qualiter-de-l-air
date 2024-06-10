@@ -33,6 +33,10 @@ h1 {
     max-width: 100%;
     height: auto;
 }
+.alert {
+    color: red;
+    font-size: larger;
+}
 /*Footer*/
 #copyright {
     display: flex;

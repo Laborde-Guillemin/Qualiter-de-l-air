@@ -36,22 +36,23 @@ function updateImage(data) {
     var imageContainer = document.getElementById('imageContainer');
     imageContainer.innerHTML = '';
 
-    // Condition pour afficher l'image en fonction d'une certaine valeur
-    if (data.COV > 300) {
-        var img = document.createElement('img');
-        img.src = 'Img/COV.png'; // Remplacez par le chemin de votre image
-        img.alt = 'Alerte de haute concentration de COV';
-        imageContainer.appendChild(img);
-    } else if (data.CO2 > 800) {
-        var img = document.createElement('img');
-        img.src = 'Img/CO2.png'; // Remplacez par le chemin de votre image
-        img.alt = 'Alerte de haute concentration de CO2';
-        imageContainer.appendChild(img);
-    } else if (data.FormeAlde > 45) {
-        var img = document.createElement('img');
-        img.src = 'Img/FormeAld.png'; // Remplacez par le chemin de votre image
-        img.alt = 'Alerte de haute concentration de Formaldéhyde';
-        imageContainer.appendChild(img);
-    }
-    // Ajoutez d'autres conditions si nécessaire
+   // Condition pour afficher l'image en fonction d'une certaine valeur
+   if (data.COV > 300 || data.CO2 > 800 || data.FormeAlde > 45) {
+    var img = document.createElement('img');
+    img.src = 'Img/air-frais.png'; // Remplacez par le chemin de votre image
+    img.alt = 'Alerte de haute concentration de COV';
+    imageContainer.appendChild(img);
+} if (data.COV > 300){
+    document.getElementById('COV').classList.add('alert');
+} else {
+    document.getElementById('COV').classList.remove('alert');
+} if (data.CO2 > 800) {
+    document.getElementById('CO2').classList.add('alert');
+}else {
+    document.getElementById('CO2').classList.remove('alert');
+} if (data.FormeAlde > 45) {
+    document.getElementById('Forme_Alde').classList.add('alert');
+} else {
+    document.getElementById('Forme_Alde').classList.remove('alert');
+}
 }
