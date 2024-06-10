@@ -36,7 +36,7 @@ int Refresh = 60000; // 1min = 60000
 int RefreshCap = 30000; // 30 seconde = 30000
 
 // Replace with your network credentials
-const char* ssid = "WIFI-CIEL"; // Wifi-visiteur
+const char* ssid = "WIFI-CIEL"; //  Wifi-visiteur
 const char* password = "alcasarciel"; // Ba4:z653z
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
@@ -558,7 +558,7 @@ void loop() {
     read_CO2(); //Capteur de CO2
     read_PM();  //Capteur de PM
     donnerHeure(); // RTC
-    /*Capteur Idem*/
+    /*IHM Idem*/
     ecran(); //Mise à jour de l'écran
     /*Guillemin*/
     ecriture();// écriture des valeurs dans la carte SD
