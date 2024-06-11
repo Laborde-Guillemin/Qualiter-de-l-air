@@ -383,6 +383,62 @@ void donnerHeure (){
   Serial.println("RTC time: "+Date +Heure);
 }
 
+//////////////////////////
+/*Gestion du serveur web*/
+//////////////////////////
+void serveurNTP(){
+  WiFi.mode(WIFI_STA); // Optional
+  WiFi.begin(ssid, password);
+  Serial.println("\nConnecting");
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(100);
+    essai++;
+    if (essai >= 30) 
+    {
+        Serial.println("Connexion échouée après plusieurs tentatives."); 
+        break;
+      }
+  } 
+}
+
+String wifi;
+
+void initWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi ..");
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print('.');
+    delay(1000);
+  }
+  wifi = WiFi.localIP().toString();
+  Serial.println(wifi);
+}
+
+void comServeur(){
+  server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request) {
+      Serial.println("Envoie vers le serveur.Ok");
+    String data = "{\"temperature\": " + String(Temp) + 
+                  ", \"humidity\": " + String(Hum) + 
+                  ", \"CO2\": " + String(CO2) + 
+                  ", \"COV\": " + String(COV) + 
+                  ", \"FormeAlde\": " + String(Alde) + 
+                  ", \"PM_1\": " + String(PM_1) + 
+                  ", \"PM_25\": " + String(PM_25) + 
+                  ", \"PM_10\": " + String(PM_10) + "}";
+    request->send(200, "application/json", data);
+  });
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SD, "/index.html", "text/html");
+  });
+  server.serveStatic("/", SD, "/");
+  server.serveStatic("/styles.css", SD, "/styles.css");
+  server.serveStatic("/script.js", SD, "/script.js");
+
+  server.begin();
+}
+
 //////////////////
 /*Gestion de IHM*/
 //////////////////
@@ -417,120 +473,165 @@ void initEcran(){
 
 void ecran(){
   // Met à jour les valeurs affichées
-  snprintf(values[0], sizeof(values[0]), "%.2f", Temp);
-  snprintf(values[1], sizeof(values[1]), "%.2f", Hum);
-  snprintf(values[2], sizeof(values[2]), "%d", COV);
-  snprintf(values[3], sizeof(values[3]), "%d", Alde);
-  snprintf(values[4], sizeof(values[4]), "%d", CO2);
-  snprintf(values[5], sizeof(values[5]), "%.2f", PM_1);
-  snprintf(values[6], sizeof(values[6]), "%.2f", PM_25);
-  snprintf(values[7], sizeof(values[7]), "%.2f", PM_10);
+  snprintf(values[0], sizeof(values[0]), "%.2f dgC", Temp);
+  snprintf(values[1], sizeof(values[1]), "%.2f %%", Hum);
+  snprintf(values[2], sizeof(values[2]), "%d /25000", COV);
+  snprintf(values[3], sizeof(values[3]), "%d ug/m3", Alde);
+  snprintf(values[4], sizeof(values[4]), "%d ppm", CO2);
+  snprintf(values[5], sizeof(values[5]), "%.2f ug/m3", PM_1);
+  snprintf(values[6], sizeof(values[6]), "%.2f ug/m3", PM_25);
+  snprintf(values[7], sizeof(values[7]), "%.2f ug/m3", PM_10);
 
   // Efface l'écran
-  display.fillScreen(WHITE);
+  display.fillScreen(BLACK);
 
-  // Affiche les étiquettes et les valeurs
-  int yPos = 10; // Position Y pour les éléments
-  display.setTextSize(2); //taille du texte
-  display.setTextColor(BLACK);
-  for (int i = 0; i < sizeof(labels) / sizeof(labels[0]); ++i) {
-    display.setCursor(20, yPos);
-    display.print(labels[i]);
-
-    // Vérifie la valeur du CO2 et définit la couleur en conséquence
-    if (i == 4) { // CO2 est à l'index 4 dans le tableau values
-      float co2Value = atof(values[i]);
-      if (co2Value > 1000) {
-        display.setTextColor(RED);
-      } else if (co2Value >= 600 && co2Value <= 1000) {
-        display.setTextColor(GREEN);
-      } else if (co2Value >= 400 && co2Value < 600) {
-        display.setTextColor(YELLOW);
-      } else if (co2Value == 400) {
-        display.setTextColor(ORANGE);
-      }
-    }else{
-        display.setTextColor(BLACK); // Couleur par défaut
-      }
-      display.print(values[i]);
-      if (i == 2) { // COV est à l'index 2 dans le tableau values
-      long covValue = atol(values[i]);
-      if (covValue > 10000) {
-        display.setTextColor(RED);
-      } else if (covValue >= 3000 && covValue <= 10000) {
-        display.setTextColor(ORANGE);
-      } else if (covValue >= 1000 && covValue < 3000) {
-        display.setTextColor(YELLOW);
-      } else if (covValue >= 300 && covValue < 1000) {
-        display.setTextColor(GREEN);
-      } else if (covValue == 300) {
-        display.setTextColor(BLACK);
-      } else {
-        display.setTextColor(GREEN);
-      }
-      //display.print(values[i]);
+ // Afficher les étiquettes et les valeurs avec les couleurs correspondantes
+    int yPos = 10; // Position Y pour les éléments
+    display.setTextSize(2);
+    display.setTextColor(WHITE);
+    for (int i = 0; i < sizeof(labels) / sizeof(labels[0]); ++i) {
+        display.setCursor(20, yPos);
+        display.setTextColor(WHITE);
+        display.print(labels[i]);
+        // Définir la couleur en fonction de l'index de l'étiquette
+        if (i == 2) { // COV
+            long covValue = atol(values[i]);
+            if (covValue > 10000) {
+                display.setTextColor(RED);
+            } else if (covValue >= 3000 && covValue <= 10000) {
+                display.setTextColor(ORANGE);
+            } else if (covValue >= 1000 && covValue < 3000) {
+                display.setTextColor(YELLOW);
+            } else if (covValue >= 300 && covValue < 1000) {
+                display.setTextColor(GREENYELLOW);
+            } else if (covValue == 300) {
+                display.setTextColor(GREENYELLOW);
+            } else {
+                display.setTextColor(WHITE); // Couleur par défaut
+            }
+        } else if (i == 4) { // CO2
+            float co2Value = atof(values[i]);
+            if (co2Value > 1000) {
+                display.setTextColor(RED);
+            } else if (co2Value >= 600 && co2Value <= 1000) {
+                display.setTextColor(ORANGE);
+            } else if (co2Value >= 400 && co2Value < 600) {
+                display.setTextColor(YELLOW);
+            } else if (co2Value == 400) {
+                display.setTextColor(GREENYELLOW);
+            } else {
+                display.setTextColor(WHITE); // Couleur par défaut
+            }
+        } else if (i == 3) { // Alde
+            display.setTextColor(WHITE); // Couleur noire pour Alde
+        } else {
+            display.setTextColor(WHITE); // Couleur par défaut pour les autres étiquettes
+        }
+        display.print(values[i]);
+        display.setTextColor(WHITE);
+        yPos += 30; // Espacement vertical entre les étiquettes 
     }
-    yPos += 30; // Espacement vertical entre les étiquettes
-  }
    // Affichage de l'heure et de la date
-    display.setTextSize(1.5);
-    display.setCursor(220, 215);
+    display.setTextSize(1);
+    display.setCursor(214,202);
     display.print(Heure); 
-    display.setCursor(220, 225);
+    display.setCursor(214,215);
     display.print(Date);
+    display.setCursor(214,228);
+    display.print("IP" + wifi);
 }
 
-//////////////////////////
-/*Gestion du serveur web*/
-//////////////////////////
-void serveurNTP(){
-  WiFi.mode(WIFI_STA); // Optional
-  WiFi.begin(ssid, password);
-  Serial.println("\nConnecting");
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
-    delay(100);
-    essai++;
-    if (essai >= 30) 
-    {
-        Serial.println("Connexion échouée après plusieurs tentatives."); 
-        break;
-      }
-  } 
-}
+/*Audio*/
+// Débit en bauds pour la communication série avec le SOMO2
+#define GPS_BAUD 9600
 
-void initWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi ..");
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print('.');
-    delay(1000);
+// Broches RX et TX pour la communication série avec le SOMO2
+#define RXD2 16
+#define TXD2 17
+
+// Objets pour la communication série avec le SOMO2
+HardwareSerial SOMOSerial(2);
+
+// Messages de contrôle pour le SOMO2
+char play[]         = {0x7E, 0x0D, 0x00, 0x00, 0x00, 0xFF, 0xF4, 0xEF};
+char next[]         = {0x7E, 0x01, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xEF};
+char Pause[]        = {0x7E, 0x0E, 0x00, 0x00, 0x00, 0xFF, 0xF2, 0xEF};
+char previous[]     = {0x7E, 0x02, 0x00, 0x00, 0x00, 0xFF, 0xFE, 0xEF};
+char volumeup[]     = {0x7E, 0x04, 0x00, 0x00, 0x00, 0xFF, 0xFC, 0xEF};
+char volumedown[]   = {0x7E, 0x05, 0x00, 0x00, 0x00, 0xFF, 0xFB, 0xEF};
+char volumebas[]    = {0x7E, 0x06, 0x00, 0x00, 0x05, 0xFF, 0xF5, 0xEF};
+char volumehaut[]   = {0x7E, 0x06, 0x00, 0x00, 0x1E, 0xFF, 0xDC, 0xEF};
+char volumeselect[] = {0x7E, 0x06, 0x00, 0x00, 0x05, 0xFF, 0xF5, 0xEF};
+char specifyeq[]    = {0x7E, 0x16, 0x00, 0x00, 0x00, 0xFF, 0xEA, 0xEF};
+char stop[]         = {0x7E, 0x16, 0x00, 0x00, 0x00, 0xFF, 0xEA, 0xEF};
+char specifypiste[] = {0x7E, 0x03, 0x00, 0x00, 0x01, 0xFF, 0xFC, 0xEF};
+
+// Durée de lecture de chaque piste en secondes
+const int DUREE_PISTE = 7;
+
+// Fonction pour calculer la somme de contrôle
+void checkSum(char piste){
+  char Sum2 = 0;
+  int Sum = 0;
+  Sum = 0xFFFF - (0x03 + 0x00 + 0x00 + piste) + 1;
+  Sum2 = Sum;
+  specifypiste[6] = Sum2;
+}
+const byte piste1 = 0x01;
+const byte piste2 = 0x02;
+const byte piste3 = 0x03;
+const byte piste4 = 0x04;
+const byte piste5 = 0x05;
+const byte piste6 = 0x06;
+const byte piste7 = 0x07;
+const byte piste8 = 0x08;
+const byte piste9 = 0x09;
+// Fonction pour envoyer des données via la communication série au SOMO2
+void out_sci_sv(char *msg)
+{
+  for (int i = 0; i < 8; i++)
+  {
+    SOMOSerial.write(*msg);
+    msg++;
   }
-  Serial.println(WiFi.localIP());
 }
 
-void comServeur(){
-  server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request) {
-      Serial.println("Envoie vers le serveur.Ok");
-    String data = "{\"temperature\": " + String(Temp) + 
-                  ", \"humidity\": " + String(Hum) + 
-                  ", \"CO2\": " + String(CO2) + 
-                  ", \"COV\": " + String(COV) + 
-                  ", \"FormeAlde\": " + String(Alde) + 
-                  ", \"PM_1\": " + String(PM_1) + 
-                  ", \"PM_25\": " + String(PM_25) + 
-                  ", \"PM_10\": " + String(PM_10) + "}";
-    request->send(200, "application/json", data);
-  });
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(SD, "/index.html", "text/html");
-  });
-  server.serveStatic("/", SD, "/");
-  server.serveStatic("/styles.css", SD, "/styles.css");
-  server.serveStatic("/script.js", SD, "/script.js");
+// Jouer une piste avec une couleur spécifique et une durée de lecture de 7 secondes
+void playTrackWithDelay(char piste, uint16_t textColor) {
+    display.setTextColor(textColor);
+    specifypiste[4] = piste;
+    checkSum(piste);
+    out_sci_sv(specifypiste);
+    delay(DUREE_PISTE * 1000); // Attendre 7 secondes
+    out_sci_sv(volumehaut);
+}
 
-  server.begin();
+void alerteAudio(){ 
+   // Vérifie la valeur du CO2 et joue la piste correspondante
+    float co2Value = atof(values[4]);
+    if (co2Value > 1000) {
+        playTrackWithDelay(piste1, RED);
+    } else if (co2Value >= 600 && co2Value <= 1000) {
+        playTrackWithDelay(piste2, ORANGE);
+    } else if (co2Value >= 400 && co2Value < 600) {
+        playTrackWithDelay(piste3, YELLOW);
+    } else if (co2Value == 400) {
+        playTrackWithDelay(piste4, GREENYELLOW);
+    }
+
+    // Vérifie la valeur de COV et joue la piste correspondante
+    long covValue = atol(values[2]);
+    if (covValue > 10000) {
+        playTrackWithDelay(piste5, RED);
+    } else if (covValue >= 3000 && covValue <= 10000) {
+        playTrackWithDelay(piste6, ORANGE);
+    } else if (covValue >= 1000 && covValue < 3000) {
+        playTrackWithDelay(piste7, YELLOW);
+    } else if (covValue >= 300 && covValue < 1000) {
+        playTrackWithDelay(piste8, GREENYELLOW);
+    } else if (covValue == 300) {
+        playTrackWithDelay(piste9, GREENYELLOW);
+    }
 }
 
 void setup() {
@@ -538,14 +639,15 @@ void setup() {
     Wire.begin();
     initSDCard();
     initFile();
+    initRTC();
+    initWiFi();
     initBME280();//température
     initSFA30();//Formaldéhyde
     initSPG40();//COV
     initSPS30();//PM
     serveurNTP();
-    initRTC();
     initEcran();
-    initWiFi();
+    SOMOSerial.begin(GPS_BAUD, SERIAL_8N1, RXD2, TXD2);
     comServeur();
 }
 
@@ -560,6 +662,7 @@ void loop() {
     donnerHeure(); // RTC
     /*IHM Idem*/
     ecran(); //Mise à jour de l'écran
+    alerteAudio();
     /*Guillemin*/
     ecriture();// écriture des valeurs dans la carte SD
     delay(RefreshCap/2);
