@@ -22,14 +22,14 @@ function fetchData() {
 
 // Fonction de mise à jour des valeurs du site web
 function updateSensorData(data) {
-    document.getElementById('temperature').textContent = data.temperature + "°C";
-    document.getElementById('humidity').textContent = data.humidity + "%";
-    document.getElementById('COV').textContent = data.COV + "/25000";
-    document.getElementById('Forme_Alde').textContent = data.FormeAlde + "µg/m³";
-    document.getElementById('CO2').textContent = data.CO2 + "ppm";
-    document.getElementById('PM_1').textContent = data.PM_1 + "µg/m³";
-    document.getElementById('PM_25').textContent = data.PM_25 + "µg/m³";
-    document.getElementById('PM_10').textContent = data.PM_10 + "µg/m³";
+    document.getElementById('temperature').textContent = data.temperature + " °C";
+    document.getElementById('humidity').textContent = data.humidity + " %";
+    document.getElementById('COV').textContent = data.COV + " /500";
+    document.getElementById('Forme_Alde').textContent = data.FormeAlde + " µg/m³";
+    document.getElementById('CO2').textContent = data.CO2 + " ppm";
+    document.getElementById('PM_1').textContent = data.PM_1 + " µg/m³";
+    document.getElementById('PM_25').textContent = data.PM_25 + " µg/m³";
+    document.getElementById('PM_10').textContent = data.PM_10 + " µg/m³";
 }
 
 function updateImage(data) {
@@ -37,12 +37,12 @@ function updateImage(data) {
     imageContainer.innerHTML = '';
 
    // Condition pour afficher l'image en fonction d'une certaine valeur
-   if (data.COV > 300 || data.CO2 > 800 || data.FormeAlde > 45) {
+   if (data.COV > 150 || data.CO2 > 800 || data.FormeAlde > 45) {
     var img = document.createElement('img');
     img.src = 'Img/air-frais.png'; // Remplacez par le chemin de votre image
     img.alt = 'Alerte de haute concentration de COV';
     imageContainer.appendChild(img);
-} if (data.COV > 300){
+} if (data.COV > 150){
     document.getElementById('COV').classList.add('alert');
 } else {
     document.getElementById('COV').classList.remove('alert');

@@ -1,4 +1,4 @@
-/* _____                 _  _                            _           _      _         _
+/*_____                 _  _                            _           _      _         _
  / ___ \               | |(_) _                        | |         | |    ( )       (_)
 | |   | | _   _   ____ | | _ | |_    ____   ____     _ | |  ____   | |    |/   ____  _   ____
 | |   |_|| | | | / _  || || ||  _)  / _  ) / ___)   / || | / _  )  | |        / _  || | / ___)
@@ -43,8 +43,8 @@ int Refresh = 60000; // 1min = 60000
 int RefreshCap = 30000; // 30 seconde = 30000
 
 // Replace with your network credentials
-const char* ssid = "WIFI-CIEL"; //  Wifi-visiteur
-const char* password = "alcasarciel"; // Ba4:z653z
+const char* ssid = "WIFI-CIEL"; //  Wifi-visiteur 
+const char* password = "alcasarciel"; // Ba4:z653z 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 
@@ -78,15 +78,15 @@ SPIClass spi = SPIClass(VSPI);
 void initSDCard(){
   spi.begin(SCK, MISO, MOSI, CS);
   if (!SD.begin(CS,spi,80000000)) {
-    Serial.println("Card Mount Failed");
+    Serial.println("Carte non connecter");
     return;
   }
   uint8_t cardType = SD.cardType();
   if(cardType == CARD_NONE){
-    Serial.println("No SD card attached");
+    Serial.println("Carte non connecter");
     return;
   }
-  Serial.print("SD Card Type: ");
+  /*Serial.print("Type de la carte SD: ");
   if(cardType == CARD_MMC){
     Serial.println("MMC");
   } else if(cardType == CARD_SD){
@@ -97,7 +97,7 @@ void initSDCard(){
     Serial.println("UNKNOWN");
   }
   uint64_t cardSize = SD.cardSize() / (1024 * 1024);
-  Serial.printf("SD Card Size: %lluMB\n", cardSize);
+  Serial.printf("SD Card Size: %lluMB\n", cardSize);*/
 }
 
 /*Écriture du fichier*/
@@ -105,29 +105,29 @@ void writeFile(fs::FS &fs, const char * path, const char * message){
   Serial.printf("Writing file: %s\n", path);
   File file = fs.open(path, FILE_WRITE);
   if(!file){
-    Serial.println("Failed to open file for writing");
+    Serial.println("Erreur pour l'ouverture du fichier");
     return;
   }
   if(file.print(message)){
-    Serial.println("File written");
+    Serial.println("Écriture du fichier");
   } else {
-    Serial.println("Write failed");
+    Serial.println("Erreur d'écriture");
   }
   file.close();
 }
 
 /*Rajout dans le fichier*/
 void appendFile(fs::FS &fs, const char * path, const char * message){
-  Serial.printf("Appending to file: %s\n", path);
+  Serial.printf("Ajout dans le fichier: %s\n", path);
   File file = fs.open(path, FILE_APPEND);
   if(!file){
-    Serial.println("Failed to open file for appending");
+    Serial.println("Erreur dans l'ajout de valeur");
     return;
   }
   if(file.print(message)){
-    Serial.println("Message appended");
+    Serial.println("Message ajouter");
   } else {
-    Serial.println("Append failed");
+    Serial.println("Erreur d'ajout");
   }
   file.close();
 }
@@ -136,9 +136,9 @@ void appendFile(fs::FS &fs, const char * path, const char * message){
 void initFile(){
   File file = SD.open("/Valeur.csv");
   if(!file) {
-    Serial.println("File doesn't exist");
-    Serial.println("Creating file...");
-    writeFile(SD, "/Valeur.csv", "Date; Heure; Température; Humidité; Indice de COV; Forme Aldéhyde; CO²; PM_1; PM_2,5; PM_10 \r\n");
+    Serial.println("Le fichier n'existe pas");
+    Serial.println("Créatrion fichier...");
+    writeFile(SD, "/Valeur.csv", "Date; Heure; Température; Humidité; Indice de COV; Formaldéhyde; CO²; PM_1; PM_2,5; PM_10 \r\n");
   }
   else {
     Serial.println("File already exists");  
@@ -387,7 +387,7 @@ void donnerHeure (){
   // variable heure
   Heure = (String(now.hour())+ ":" + String(now.minute()) +"");
   // Horodater les mesures des capteurs avec l'heure du RTC
-  Serial.println("RTC time: "+Date +Heure);
+  Serial.println("RTC time : "+Date +Heure);
 }
 
 //////////////////////////
@@ -412,17 +412,18 @@ void serveurNTP(){
 String wifi;
 
 void initWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
+  WiFi.mode(WIFI_STA);// configuration en mode stations
+  WiFi.begin(ssid, password); // connection grâce à l'identifiant et le mot de passe
   Serial.print("Connecting to WiFi ..");
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print('.');
-    delay(1000);
+    delay(1000); // attente de connection
   }
   wifi = WiFi.localIP().toString();
-  Serial.println(wifi);
+  Serial.println(wifi); // écriture de l'adresse IP
 }
 
+/*Communication entre l'esp-32 et la page web*/
 void comServeur(){
   server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request) {
       Serial.println("Envoie vers le serveur.Ok");
@@ -436,14 +437,16 @@ void comServeur(){
                   ", \"PM_10\": " + String(PM_10) + "}";
     request->send(200, "application/json", data);
   });
+   //Gestions du fichier .html
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(SD, "/index.html", "text/html");
   });
-  server.serveStatic("/", SD, "/");
-  server.serveStatic("/styles.css", SD, "/styles.css");
-  server.serveStatic("/script.js", SD, "/script.js");
+    //Gestions des fichiers statiques
+  server.serveStatic("/", SD, "/");// utilisation de la carte SD
+  server.serveStatic("/styles.css", SD, "/styles.css");// utilisation du fichier css dans la carte sd
+  server.serveStatic("/script.js", SD, "/script.js");// utilisation du fichier js dans la carte sd
 
-  server.begin();
+  server.begin(); // démarage du serveur
 }
 
 //////////////////
@@ -462,7 +465,7 @@ Arduino_ESP32SPI bus = Arduino_ESP32SPI(TFT_DC, TFT_CS, TFT_SCK, TFT_MOSI, TFT_M
 Arduino_ILI9341 display = Arduino_ILI9341(&bus, TFT_RESET);
 
 // Étiquettes pour les données affichées
-const char* labels[] = {"Temperature:","Humidite:","COV:","Forme Aldehyde:","CO2:","Pm_1:","Pm_2,5:","Pm_10:"};
+const char* labels[] = {"Temperature:","Humidite:","COV:","Formaldehyde:","CO2:","Pm_1:","Pm_2,5:","Pm_10:"};
 
 char values[8][10]; // Tableau pour stocker les valeurs à afficher
 
@@ -482,7 +485,7 @@ void ecran(){
   // Met à jour les valeurs affichées
   snprintf(values[0], sizeof(values[0]), "%.2f dgC", Temp);
   snprintf(values[1], sizeof(values[1]), "%.2f %%", Hum);
-  snprintf(values[2], sizeof(values[2]), "%d /25000", COV);
+  snprintf(values[2], sizeof(values[2]), "%d", COV);
   snprintf(values[3], sizeof(values[3]), "%d ug/m3", Alde);
   snprintf(values[4], sizeof(values[4]), "%d ppm", CO2);
   snprintf(values[5], sizeof(values[5]), "%.2f ug/m3", PM_1);
@@ -646,16 +649,16 @@ void setup() {
     Wire.begin();
     initSDCard();
     initFile();
-    initRTC();
     initWiFi();
+    initRTC();
     initBME280();//température
-    initSFA30();//Formaldéhyde
+    initSFA30();//Forme aldéhyde
     initSPG40();//COV
     initSPS30();//PM
     serveurNTP();
     initEcran();
     SOMOSerial.begin(GPS_BAUD, SERIAL_8N1, RXD2, TXD2);
-    comServeur();
+    comServeur(); //communication avec le serveur
 }
 
 void loop() {
